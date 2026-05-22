@@ -87,6 +87,20 @@ def current_time_tool():
 
     return now.strftime("%Y-%m-%d %I:%M:%S %p")
 
+
+# ==========================================
+# Read File Tool
+# ==========================================
+
+def read_file_tool(filename):
+
+    with open(filename, "r", encoding="utf-8") as file:
+
+        content = file.read()
+
+    return content
+
+
 # ==========================================
 # ONE AI REQUEST FOR TOOL DECISION
 # ==========================================
@@ -168,6 +182,48 @@ Return:
     "tool": "none"
 }}
 
+
+3. read_file
+
+Use when the user wants to:
+- read a file
+- open a file
+- summarize a file
+- view file contents
+
+The filename can be ANY valid filename.
+
+Examples:
+
+User:
+"Read notes.txt"
+
+Return:
+{{
+    "tool": "read_file",
+    "filename": "notes.txt"
+}}
+
+User:
+"Open report.txt"
+
+Return:
+{{
+    "tool": "read_file",
+    "filename": "report.txt"
+}}
+
+User:
+"Summarize notes.txt"
+
+Return:
+{{
+    "tool": "read_file",
+    "filename": "notes.txt"
+}}
+
+
+
 IMPORTANT:
 Return ONLY valid JSON.
 No markdown.
@@ -190,6 +246,44 @@ User message:
     text = response.choices[0].message.content.strip()
 
     return json.loads(text)
+
+
+# ==========================================
+# AI File Summarizer
+# ==========================================
+
+def summarize_file_with_ai(filename, file_content):
+
+    prompt = f"""
+You are a helpful AI assistant.
+
+The user uploaded/read this file:
+
+Filename:
+{filename}
+
+File Content:
+{file_content}
+
+Please provide:
+1. A short summary
+2. Important topics
+3. Key insights
+
+Keep the response beginner-friendly.
+"""
+
+    response = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+    )
+
+    return response.choices[0].message.content
 
 # ==========================================
 # Normal Chat
@@ -216,6 +310,9 @@ def normal_chat(user_input, chat_history):
     })
 
     return bot_reply
+
+
+
 
 # ==========================================
 # Chatbot Loop
@@ -273,6 +370,36 @@ while True:
             current_time = current_time_tool()
 
             print(f"\nBot: Current date/time is {current_time}\n")
+
+        # ==========================================
+        # Read File Tool
+        # ==========================================
+
+        elif tool == "read_file":
+
+            filename = decision["filename"]
+
+            print(f"\n[Reading File] {filename}")
+
+            file_content = read_file_tool(filename)
+
+            print("\n[Raw File Content]\n")
+            print(file_content)
+
+            # ==========================================
+            # Send file content back to AI
+            # ==========================================
+
+            summary = summarize_file_with_ai(
+                filename,
+                file_content
+            )
+
+            print("\n[AI Summary]\n")
+
+            print(summary)
+            print()
+
 
         # ==========================================
         # Normal Chat
