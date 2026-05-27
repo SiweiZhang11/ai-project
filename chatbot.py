@@ -1,10 +1,12 @@
-from openai import OpenAI
 from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
+from langchain.tools import tool
+from langchain_core.messages import HumanMessage
+from langgraph.prebuilt import create_react_agent
 from datetime import datetime
 import os
 import ast
 import operator
-import json
 
 # ==========================================
 # Load Environment Variables
@@ -15,18 +17,19 @@ load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
 
 if not api_key:
-    raise ValueError("Missing OPENAI_API_KEY in .env file")
+    raise ValueError("Missing OPENAI_API_KEY")
 
 # ==========================================
-# OpenAI Client
+# OpenAI LLM
 # ==========================================
 
-client = OpenAI(api_key=api_key)
-
-MODEL_NAME = "gpt-4o-mini"
+llm = ChatOpenAI(
+    model="gpt-4o-mini",
+    temperature=0
+)
 
 # ==========================================
-# Calculator Tool
+# Calculator Logic
 # ==========================================
 
 allowed_operators = {
@@ -40,7 +43,7 @@ allowed_operators = {
 }
 
 
-def calculator_tool(expression):
+def safe_calculate(expression):
 
     def evaluate(node):
 
@@ -48,369 +51,88 @@ def calculator_tool(expression):
             return node.value
 
         if isinstance(node, ast.BinOp):
-
             left = evaluate(node.left)
             right = evaluate(node.right)
-
             operator_type = type(node.op)
-
             if operator_type not in allowed_operators:
                 raise ValueError("Operator not allowed")
-
             return allowed_operators[operator_type](left, right)
 
         if isinstance(node, ast.UnaryOp):
-
             operand = evaluate(node.operand)
-
             operator_type = type(node.op)
-
             if operator_type not in allowed_operators:
                 raise ValueError("Operator not allowed")
-
             return allowed_operators[operator_type](operand)
 
         raise ValueError("Invalid expression")
 
-    parsed_expression = ast.parse(expression, mode="eval")
-
-    return evaluate(parsed_expression.body)
+    parsed = ast.parse(expression, mode="eval")
+    return evaluate(parsed.body)
 
 # ==========================================
-# Current Time Tool
+# Tools
 # ==========================================
 
+@tool
+def calculator(expression: str) -> str:
+    """Use this tool for math calculations."""
+    try:
+        result = safe_calculate(expression)
+        return str(result)
+    except Exception as e:
+        return f"Error: {e}"
 
-def current_time_tool():
 
+@tool
+def current_time(dummy_input: str = "") -> str:
+    """Use this tool when the user asks for the current time or date."""
     now = datetime.now()
-
     return now.strftime("%Y-%m-%d %I:%M:%S %p")
 
 
-# ==========================================
-# Read File Tool
-# ==========================================
-
-def read_file_tool(filename):
-
-    with open(filename, "r", encoding="utf-8") as file:
-
-        content = file.read()
-
-    return content
-
-
-# ==========================================
-# ONE AI REQUEST FOR TOOL DECISION
-# ==========================================
-
-
-def decide_action(user_input):
-
-    prompt = f"""
-You are an AI agent router.
-
-Your job is to decide:
-1. Which tool should be used
-2. What arguments are needed
-
-Available tools:
-
-1. calculator
-Use for:
-- math
-- calculations
-- percentages
-
-Example:
-"What is 25 times 18?"
-
-Return:
-{{
-    "tool": "calculator",
-    "expression": "25 * 18"
-}}
-
-ONLY use this tool when the user wants the ACTUAL live current time/date.
-
-Use for:
-- "What time is it?"
-- "Current date please"
-- "Tell me today's date"
-
-DO NOT use for:
-- explanations
-- educational questions
-- conceptual discussions
-- questions ABOUT time calculation
-
-Examples:
-
-User:
-"What time is it?"
-Return:
-{{
-    "tool": "current_time"
-}}
-
-User:
-"What is today's date?"
-Return:
-{{
-    "tool": "current_time"
-}}
-
-User:
-"How do clocks work?"
-Return:
-{{
-    "tool": "none"
-}}
-
-User:
-"How do you calculate the current time?"
-Return:
-{{
-    "tool": "none"
-}}
-
-User:
-"Explain time zones"
-Return:
-{{
-    "tool": "none"
-}}
-
-
-3. read_file
-
-Use when the user wants to:
-- read a file
-- open a file
-- summarize a file
-- view file contents
-
-The filename can be ANY valid filename.
-
-Examples:
-
-User:
-"Read notes.txt"
-
-Return:
-{{
-    "tool": "read_file",
-    "filename": "notes.txt"
-}}
-
-User:
-"Open report.txt"
-
-Return:
-{{
-    "tool": "read_file",
-    "filename": "report.txt"
-}}
-
-User:
-"Summarize notes.txt"
-
-Return:
-{{
-    "tool": "read_file",
-    "filename": "notes.txt"
-}}
-
-
-
-IMPORTANT:
-Return ONLY valid JSON.
-No markdown.
-No explanation.
-
-User message:
-{user_input}
-"""
-
-    response = client.chat.completions.create(
-        model=MODEL_NAME,
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
-    )
-
-    text = response.choices[0].message.content.strip()
-
-    return json.loads(text)
-
+@tool
+def read_file(filename: str) -> str:
+    """
+    Use this tool whenever the user wants to read, open, view, summarize,
+    analyze, or explain the contents of a local text file.
+    Input should be a filename like: notes.txt, report.txt, data.txt
+    """
+    try:
+        with open(filename, "r", encoding="utf-8") as file:
+            content = file.read()
+        return content
+    except Exception as e:
+        return f"Error reading file: {e}"
 
 # ==========================================
-# AI File Summarizer
+# Create Agent (modern approach)
 # ==========================================
 
-def summarize_file_with_ai(filename, file_content):
+tools = [calculator, current_time, read_file]
 
-    prompt = f"""
-You are a helpful AI assistant.
-
-The user uploaded/read this file:
-
-Filename:
-{filename}
-
-File Content:
-{file_content}
-
-Please provide:
-1. A short summary
-2. Important topics
-3. Key insights
-
-Keep the response beginner-friendly.
-"""
-
-    response = client.chat.completions.create(
-        model=MODEL_NAME,
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
-    )
-
-    return response.choices[0].message.content
+agent = create_react_agent(llm, tools)
 
 # ==========================================
-# Normal Chat
+# Chat Loop
 # ==========================================
 
-
-def normal_chat(user_input, chat_history):
-
-    chat_history.append({
-        "role": "user",
-        "content": user_input
-    })
-
-    response = client.chat.completions.create(
-        model=MODEL_NAME,
-        messages=chat_history
-    )
-
-    bot_reply = response.choices[0].message.content
-
-    chat_history.append({
-        "role": "assistant",
-        "content": bot_reply
-    })
-
-    return bot_reply
-
-
-
-
-# ==========================================
-# Chatbot Loop
-# ==========================================
-
-print("OpenAI Agent Chatbot Started!")
+print("LangChain Agent Started!")
 print("Type 'exit' to quit.\n")
-
-chat_history = [
-    {
-        "role": "system",
-        "content": "You are a helpful AI assistant."
-    }
-]
 
 while True:
 
     user_input = input("You: ")
 
     if user_input.lower() == "exit":
-        print("Goodbye!")
         break
 
     try:
-
-        # ==========================================
-        # ONE AI DECISION
-        # ==========================================
-
-        decision = decide_action(user_input)
-
-        print("\n[AI Decision]")
-        print(decision)
-
-        tool = decision["tool"]
-
-        # ==========================================
-        # Calculator Tool
-        # ==========================================
-
-        if tool == "calculator":
-
-            expression = decision["expression"]
-
-            result = calculator_tool(expression)
-
-            print(f"\nBot: The result is {result}\n")
-
-        # ==========================================
-        # Current Time Tool
-        # ==========================================
-
-        elif tool == "current_time":
-
-            current_time = current_time_tool()
-
-            print(f"\nBot: Current date/time is {current_time}\n")
-
-        # ==========================================
-        # Read File Tool
-        # ==========================================
-
-        elif tool == "read_file":
-
-            filename = decision["filename"]
-
-            print(f"\n[Reading File] {filename}")
-
-            file_content = read_file_tool(filename)
-
-            print("\n[Raw File Content]\n")
-            print(file_content)
-
-            # ==========================================
-            # Send file content back to AI
-            # ==========================================
-
-            summary = summarize_file_with_ai(
-                filename,
-                file_content
-            )
-
-            print("\n[AI Summary]\n")
-
-            print(summary)
-            print()
-
-
-        # ==========================================
-        # Normal Chat
-        # ==========================================
-
-        else:
-
-            bot_reply = normal_chat(user_input, chat_history)
-
-            print(f"\nBot: {bot_reply}\n")
+        result = agent.invoke({"messages": [HumanMessage(content=user_input)]})
+        response = result["messages"][-1].content
+        print("\nBot:", response)
+        print()
 
     except Exception as e:
-
-        print("\nError:", e, "\n")
+        print("\nError:", e)
+        print()
