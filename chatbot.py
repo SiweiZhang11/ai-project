@@ -2,7 +2,8 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain.tools import tool
 from langchain_core.messages import HumanMessage
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
+from langgraph.checkpoint.memory import InMemorySaver
 from datetime import datetime
 import os
 import ast
@@ -105,19 +106,45 @@ def read_file(filename: str) -> str:
     except Exception as e:
         return f"Error reading file: {e}"
 
+@tool
+def write_file(filename: str, content: str) -> str:
+    """
+    Use this tool when the user wants to create a file, save information
+    to a file, or write content to a local text file.
+
+    filename: The name of the file to create, such as result.txt.
+    content: The text that should be written into the file.
+    """
+    try:
+        with open(filename, "w", encoding="utf-8") as file:
+            file.write(content)
+
+        return f"Successfully wrote to {filename}"
+
+    except Exception as e:
+        return f"Error writing file: {e}"
+
+
 # ==========================================
 # Create Agent (modern approach)
 # ==========================================
 
-tools = [calculator, current_time, read_file]
+#Register the tools
+tools = [calculator, current_time, read_file, write_file]
 
-agent = create_react_agent(llm, tools)
+checkpointer = InMemorySaver()
+
+agent = create_agent(
+    model=llm,
+    tools=tools,
+    checkpointer=checkpointer
+)
 
 # ==========================================
 # Chat Loop
 # ==========================================
 
-print("LangChain Agent Started!")
+print("LangChain Agent Started! Proejct created by Siwei.")
 print("Type 'exit' to quit.\n")
 
 while True:
@@ -128,7 +155,36 @@ while True:
         break
 
     try:
-        result = agent.invoke({"messages": [HumanMessage(content=user_input)]})
+        result = agent.invoke(
+            {
+                "messages": [HumanMessage(content=user_input)]
+            },
+            config={
+                "configurable": {
+                    "thread_id": "conversation_1"
+                }
+            }
+        )
+        
+        # ==========================================
+        # Debug: Show Agent Steps
+        # ==========================================
+
+        print("\n===== AGENT STEPS =====")
+
+        for message in result["messages"]:
+            print("\nType:", type(message).__name__)
+            print("Content:", message.content)
+
+            if hasattr(message, "tool_calls") and message.tool_calls:
+                print("Tool Calls:", message.tool_calls)
+
+        print("\n===== END =====")
+
+        # ==========================================
+        # Final Response
+        # ==========================================
+        
         response = result["messages"][-1].content
         print("\nBot:", response)
         print()
