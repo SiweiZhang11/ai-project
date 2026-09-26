@@ -166,8 +166,9 @@ while True:
             }
         )
         
+
         # ==========================================
-        # Debug: Show Agent Steps
+        # Debug code: Show Agent Steps
         # ==========================================
 
         print("\n===== AGENT STEPS =====")
@@ -184,7 +185,7 @@ while True:
         # ==========================================
         # Final Response
         # ==========================================
-        
+
         response = result["messages"][-1].content
         print("\nBot:", response)
         print()
